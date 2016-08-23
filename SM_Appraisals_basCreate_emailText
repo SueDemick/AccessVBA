@@ -1,0 +1,292 @@
+Option Compare Database
+Option Explicit
+
+
+Global g_iLetterNumber          As Integer
+Global g_iEmailNumber           As Integer
+
+Dim m_dtHireDate                As Date
+
+Dim m_sSubject                  As String
+Dim m_sEmailText                As String
+Dim m_sTo                       As String
+Dim m_sCC                       As String
+Dim m_sStore                    As String
+Dim m_sDistrict                 As String
+
+Global g_sSSN                   As String
+
+Public Sub eMails_To_Create(Optional iLetterYear As Integer)
+On Error GoTo Err_eMails_To_Create
+
+Dim strSQL          As String
+
+    DoCmd.Hourglass True
+    
+    '   Forms!frm_eMails.lblQuery.Caption = "eMail"
+    strSQL = "Select qsD0E.* from qsD0E Where NumberOfDays >= 28;"
+    Call Create_Email_Text(strSQL, False)
+    
+    DoCmd.Hourglass False
+    
+    
+Exit_eMails_To_Create:
+    Exit Sub
+    
+Err_eMails_To_Create:
+    MsgBox "Error Number:  " & Err.Number & vbCrLf & Err.Description, vbOKOnly + vbExclamation, "basCreateEmailText - eMails_To_Create"
+    
+    Resume Exit_eMails_To_Create
+    Resume
+    
+End Sub
+Private Sub Create_Email_Text(sSQLToCreate As String, blnOngoing As Boolean, Optional iLetterYear As Integer)
+On Error GoTo Err_Create_Email_Text
+
+Dim CreateRS                As ADODB.Recordset
+
+Dim iInStoreCounter         As Integer
+Dim iNumberOfDays           As Integer
+
+Dim sMessageGreeting        As String
+
+Dim sMessage_1              As String
+Dim sMessage_2              As String
+Dim sMessage_3              As String
+Dim sMessage_4              As String
+Dim sMessage_5              As String
+
+Dim sMessageList            As String
+Dim sName                   As String
+Dim sFullName               As String
+
+Dim sStore                  As String
+Dim sLocation               As String
+Dim sColumnHeader           As String
+Dim sJobName                As String
+
+
+    Set CreateRS = New ADODB.Recordset
+    CreateRS.Open sSQLToCreate, CurrentProject.Connection, adOpenDynamic, adLockReadOnly
+    
+    
+    Do While Not CreateRS.EOF
+        iNumberOfDays = CreateRS("NumberOfDays"): Debug.Print iNumberOfDays
+        If iNumberOfDays >= 28 And iNumberOfDays < 35 Then
+            g_iEmailNumber = 0
+            
+        ElseIf iNumberOfDays >= 35 And iNumberOfDays < 42 Then
+            g_iEmailNumber = 1
+            
+        ElseIf iNumberOfDays >= 42 Then
+            g_iEmailNumber = 2
+            
+        Else
+            g_iEmailNumber = 99
+            
+        End If
+        
+        
+        m_sStore = CreateRS.Fields("Store")
+        m_sDistrict = CreateRS.Fields("District")
+        
+        
+        '   These parts are the same for every email.
+        m_sSubject = DLookup("ElementBody", "tblLetterElements", "ElementName = 'Subject'")
+        sMessageGreeting = DLookup("ElementBody", "tblLetterElements", "ElementName = 'Attention'") & "  " & vbCrLf & vbCrLf
+
+        
+        sMessage_2 = DLookup("elementBody", "tblLetterElements", "ElementName = 'Paragraph 2 A'") & vbCrLf & vbCrLf
+        sMessage_3 = DLookup("elementBody", "tblLetterElements", "ElementName = 'Paragraph 3 A'") & vbCrLf & vbCrLf
+        sMessage_4 = DLookup("elementBody", "tblLetterElements", "ElementName = 'Paragraph 4 A'") & vbCrLf & vbCrLf
+        sMessage_5 = DLookup("elementBody", "tblLetterElements", "ElementName = 'Paragraph 4 B'") & vbCrLf & vbCrLf
+        sColumnHeader = DLookup("elementBody", "tblLetterElements", "ElementName = 'ColumnHeader'") & vbCrLf
+        
+                
+        '   Construct message based on which letter is to be sent
+        Select Case g_iEmailNumber
+            Case 0      '   First Notice    28 days
+                '   Check to see if individual with SSN issue is the Store Manager
+                sFullName = CreateRS("FIRST_NAME")
+                sFullName = sFullName & IIf(IsNull(CreateRS("MIDDLE_NAME")), "", " " & CreateRS("MIDDLE_NAME"))
+                sFullName = sFullName & " " & CreateRS("LAST_NAME")
+                
+                sMessage_1 = DLookup("ElementBody", "tblLetterElements", "ElementName = 'Paragraph 1 28'") & " "
+                sMessage_1 = sMessage_1 & DLookup("ElementBody", "tblLetterElements", "ElementName = 'Paragraph 1 C'")
+                
+            Case 1      '   Second Notice   35 days
+                sMessage_1 = DLookup("ElementBody", "tblLetterElements", "ElementName = 'Paragraph 1 35'") & " "
+                sMessage_1 = sMessage_1 & DLookup("ElementBody", "tblLetterElements", "ElementName = 'Paragraph 1 C'")
+                 
+            Case 2      '   Third Notice    42 days
+                sMessage_1 = DLookup("ElementBody", "tblLetterElements", "ElementName = 'Paragraph 1 42'") & " "
+                sMessage_1 = sMessage_1 & DLookup("ElementBody", "tblLetterElements", "ElementName = 'Paragraph 1 C'")
+                
+            Case Else   '   greater than 48 days
+                '   No Email Sent
+                
+        End Select
+                
+                
+        '   Constructs TO and CC based on email number
+        Select Case g_iEmailNumber
+            Case 0          '   Sent to Store, District Manager
+                If left(CreateRS("STORE"), 2) = "09" Then
+                    m_sTo = CreateRS.Fields("DC_HRM_Email")
+                    m_sCC = ""
+                    
+                Else
+                    '   Check using Store Manager Name
+                    'If CreateRS("SM_Name") = sFullName Then
+                    
+                    '   Check using the Job Name
+                    If left(CreateRS("JOB_NAME"), InStr(1, CreateRS("JOB_NAME"), ".") - 1) = "Store Manager" Then
+                        m_sTo = CreateRS("DM_Email")
+                        m_sCC = ""
+                        
+                    Else
+                        m_sTo = "S" & m_sStore & "@familydollar.com"
+                        m_sCC = ""
+                    
+                    End If
+                                
+                End If
+                
+            Case 1, 2       '   Sent to Store, District Manager
+                If left(CreateRS("STORE"), 2) = "09" Then
+                    m_sTo = CreateRS.Fields("DC_HRM_Email")
+                    m_sCC = ""
+                    
+                Else
+                    '   Check using Store Manager Name
+                    'If CreateRS("SM_Name") = sFullName Then
+                    
+                    '   Check using the Job Name
+                    If left(CreateRS("JOB_NAME"), InStr(1, CreateRS("JOB_NAME"), ".") - 1) = "Store Manager" Then
+                        m_sTo = CreateRS("DM_Email")
+                        m_sCC = ""
+                        
+                    Else
+                        m_sTo = "S" & m_sStore & "@familydollar.com"
+                        m_sCC = CreateRS.Fields("DM_Email")
+                    
+                    End If
+                                
+                End If
+                
+            Case Else   '   none sent
+                '   No Email Sent
+                
+            
+        End Select
+
+        sStore = CreateRS.Fields("Store") '   : Debug.Print "store =  " & sStore
+        sLocation = CreateRS.Fields("Location") '   : Debug.Print "location =  " & sLocation
+        sMessageList = ""
+        
+        If g_iEmailNumber = 99 Then
+            CreateRS.MoveNext
+            
+        Else
+            iInStoreCounter = 1
+            Do While sLocation = CreateRS.Fields("Location")        'sStore = CreateRS.Fields("STORE")
+                '   Check to see if individual with SSN issue is the Store Manager
+                sFullName = CreateRS("FIRST_NAME")
+                sFullName = sFullName & IIf(IsNull(CreateRS("MIDDLE_NAME")), "", " " & CreateRS("MIDDLE_NAME"))
+                sFullName = sFullName & " " & CreateRS("LAST_NAME")
+                    
+                '   Check using Store Manager Name
+                'If CreateRS("SM_Name") = sFullName And iInStoreCounter > 1 Then
+                
+                '   Check using the Job Name
+                If left(CreateRS("JOB_NAME"), InStr(1, CreateRS("JOB_NAME"), ".") - 1) = "Store Manager" And iInStoreCounter > 1 Then
+                    '   CreateRS.MovePrevious
+                    Exit Do
+                    
+                Else
+                    '   This section different for each individual
+                    g_sSSN = CreateRS("EMPLOYEE_NUMBER")
+                    sName = ProperCase(CreateRS("FIRST_NAME")) & " " & ProperCase(CreateRS("LAST_NAME"))
+                    sName = sName & Space(39 - Len(sName))
+                    sJobName = left(CreateRS("JOB_NAME"), InStr(1, CreateRS("JOB_NAME"), ".") - 1) & Space(23 - Len(left(CreateRS("JOB_NAME"), InStr(1, CreateRS("JOB_NAME"), ".") - 1)))
+                    
+                    
+                    
+                    sMessageList = sMessageList & sName & Space(5) & g_sSSN & Space(15 - Len(g_sSSN)) & Space(10) & sJobName & Space(5) & CreateRS("STORE") & vbCrLf
+                    
+                    CreateRS.MoveNext
+                    iInStoreCounter = iInStoreCounter + 1
+                    If CreateRS.EOF Then Exit Do
+                        
+                End If
+                
+            Loop    '   STORE
+            
+            m_sEmailText = sMessageGreeting & vbCrLf & vbCrLf
+            m_sEmailText = m_sEmailText & sMessage_1 & vbCrLf & vbCrLf & sMessage_2 & vbCrLf
+            m_sEmailText = m_sEmailText & sMessage_3 & vbCrLf & vbCrLf & sMessage_4 & sMessage_5 & vbCrLf & vbCrLf
+            m_sEmailText = m_sEmailText & sColumnHeader & sMessageList
+            
+                    
+            Call Append_New_Emails
+            'CreateRS.MoveNext
+        
+        End If
+        
+    Loop
+    
+    CreateRS.Close
+
+
+Exit_Create_Email_Text:
+    Exit Sub
+    
+Err_Create_Email_Text:
+    MsgBox "Error Number:  " & Err.Number & vbCrLf & Err.Description, vbExclamation + vbOKOnly, "basCreateEmailText - Create_Email_Text"
+    
+    Resume Exit_Create_Email_Text
+    Resume
+    
+End Sub
+
+Private Sub Append_New_Emails()
+
+
+Dim EmailsToSendRS              As ADODB.Recordset
+
+    Set EmailsToSendRS = New ADODB.Recordset
+    
+    EmailsToSendRS.Open "Select * from tblEmailsSent;", CurrentProject.Connection, adOpenKeyset, adLockOptimistic
+    
+    With EmailsToSendRS
+        .AddNew
+            .Fields("EMAIL_NUM") = g_iEmailNumber
+            .Fields("DATE_CREATED") = Date
+            .Fields("EMAIL_MSG") = m_sEmailText
+            .Fields("SUBJECT") = m_sSubject
+            .Fields("TO") = m_sTo
+            .Fields("STORE") = m_sStore
+            .Fields("DISTRICT") = m_sDistrict
+            If m_sCC <> "" Then
+                .Fields("CC") = m_sCC
+            
+            End If
+        
+        .Update
+        
+        .Close
+    
+    End With
+    
+    Set EmailsToSendRS = Nothing
+
+
+End Sub
+
+Public Function LetterNumber() As Integer
+
+    LetterNumber = g_iLetterNumber
+    
+End Function
+
+Enter file contents here
