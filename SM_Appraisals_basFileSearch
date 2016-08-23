@@ -1,0 +1,345 @@
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'                   RefreshTableLinks                          '
+'                                                              '
+'      This module contains functions that refresh the         '
+'      links to ReLink tables if they aren't available.        '
+'                                                              '
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Option Explicit           ' Require variables to be declared before being used.
+Option Compare Database   ' Use database order for string comparisons.
+
+Declare Function GetOpenFileName Lib "comdlg32.dll" Alias "GetOpenFileNameA" (pOpenfilename As OPENFILENAME) As Boolean
+Declare Function GetSaveFileName Lib "comdlg32.dll" Alias "GetSaveFileNameA" (pOpenfilename As OPENFILENAME) As Boolean
+
+Type MSA_OPENFILENAME
+    ' Filter string used for the Open dialog filters.
+    ' Use MSA_CreateFilterString() to create this.
+    ' Default = All Files, *.*
+    sFilter           As String
+    
+    ' Initial Filter to display.
+    ' Default = 1.
+    lngFilterIndex      As Long
+    
+    ' Initial directory for the dialog to open in.
+    ' Default = Current working directory.
+    sInitialDir       As String
+    
+    ' Initial file name to populate the dialog with.
+    ' Default = "".
+    sInitialFile      As String
+    sDialogTitle      As String
+    
+    ' Default extension to append to file if user didn't specify one.
+    ' Default = System Values (Open File, Save File).
+    sDefaultExtension As String
+    
+    ' Flags (see constant list) to be used.
+    ' Default = no flags.
+    lngFlags            As Long
+    
+    ' Full path of file picked.  When the File Open dialog box is
+    ' presented, if the user picks a nonexistent file,
+    ' only the text in the "File Name" box is returned.
+    sFullPathReturned As String
+    
+    ' File name of file picked.
+    sFileNameReturned As String
+    
+    ' Offset in full path (strFullPathReturned) where the file name
+    ' (strFileNameReturned) begins.
+    intFileOffset       As Integer
+    
+    ' Offset in full path (strFullPathReturned) where the file extension begins.
+    intFileExtension    As Integer
+
+End Type
+
+Const ALLFILES = "All Files"
+
+Type OPENFILENAME
+    lStructSize         As Long
+    hwndOwner           As Long
+    hInstance           As Long
+    lpstrFilter         As String
+    lpstrCustomFilter   As Long
+    nMaxCustrFilter     As Long
+    nFilterIndex        As Long
+    lpstrFile           As String
+    nMaxFile            As Long
+    lpstrFileTitle      As String
+    nMaxFileTitle       As Long
+    lpstrInitialDir     As String
+    lpstrTitle          As String
+    Flags               As Long
+    nFileOffset         As Integer
+    nFileExtension      As Integer
+    lpstrDefExt         As String
+    lCustrData          As Long
+    lpfnHook            As Long
+    lpTemplateName      As Long
+
+End Type
+
+Const OFN_ALLOWMULTISELECT = &H200
+Const OFN_CREATEPROMPT = &H2000
+Const OFN_EXPLORER = &H80000
+Const OFN_FILEMUSTEXIST = &H1000
+Const OFN_HIDEREADONLY = &H4
+Const OFN_NOCHANGEDIR = &H8
+Const OFN_NODEREFERENCELINKS = &H100000
+Const OFN_NONETWORKBUTTON = &H20000
+Const OFN_NOREADONLYRETURN = &H8000
+Const OFN_NOVALIDATE = &H100
+Const OFN_OVERWRITEPROMPT = &H2
+Const OFN_PATHMUSTEXIST = &H800
+Const OFN_READONLY = &H1
+Const OFN_SHOWHELP = &H10
+
+Function FindDataFile(sSearchPath As String, sSearchDatabase As String, Optional sType As String) As String
+' Displays the Open dialog box for the user to locate
+' the DataFile. Returns the full path to ReLink.
+    
+    Dim msaof As MSA_OPENFILENAME
+    
+    Select Case sType
+        Case "txt"
+            ' Set options for the dialog box.
+            msaof.sDialogTitle = "Find the file to Import."
+            msaof.sInitialDir = sSearchPath
+            msaof.sFilter = MSA_CreateFilterString("Text Files", "*.txt")
+            
+        Case "xls"
+            ' Set options for the dialog box.
+            msaof.sDialogTitle = "Find the file to Import."
+            msaof.sInitialDir = sSearchPath
+            msaof.sFilter = MSA_CreateFilterString("Spread Sheets", "*.xls; *.xlsx")
+        
+        Case Else
+            ' Set options for the dialog box.
+            msaof.sDialogTitle = "Where is the   " & UCase(sSearchDatabase) & "  Database?"
+            msaof.sInitialDir = sSearchPath
+            msaof.sFilter = MSA_CreateFilterString("Databases", "*.mdb; *.accdb")
+            
+    End Select
+    
+    ' Call the Open dialog routine.
+    MSA_GetOpenFileName msaof
+    
+    ' Return the path and file name.
+    FindDataFile = Trim(msaof.sFullPathReturned)
+    
+End Function
+
+
+Function MSA_CreateFilterString(ParamArray varFilt() As Variant) As String
+' Creates a filter string from the passed in arguments.
+' Returns "" if no argumentss are passed in.
+' Expects an even number of argumentss (filter name, extension), but
+' if an odd number is passed in, it appends "*.*".
+    
+Dim sFilter                   As String
+Dim intRet                      As Integer
+Dim intNum                      As Integer
+
+    intNum = UBound(varFilt)
+    If (intNum <> -1) Then
+        For intRet = 0 To intNum
+            sFilter = sFilter & varFilt(intRet) & vbNullChar
+        
+        Next
+        
+        If intNum Mod 2 = 0 Then
+            sFilter = sFilter & "*.*" & vbNullChar
+        
+        End If
+        
+        sFilter = sFilter & vbNullChar
+    
+    Else
+        sFilter = ""
+    
+    End If
+
+    MSA_CreateFilterString = sFilter
+
+End Function
+
+Function MSA_ConvertFilterString(sFilterIn As String) As String
+' Creates a filter string from a bar ("|") separated string.
+' The string should pairs of filter|extension strings, i.e. "Access Databases|*.mdb|All Files|*.*"
+' If no extensions exists for the last filter pair, *.* is added.
+' This code will ignore any empty strings, i.e. "||" pairs.
+' Returns "" if the strings passed in is empty.
+
+    
+Dim sFilter           As String
+Dim intNum              As Integer
+Dim intPos              As Integer
+Dim intLastPos          As Integer
+
+    sFilter = ""
+    intNum = 0
+    intPos = 1
+    intLastPos = 1
+
+    ' Add strings as long as we find bars.
+    ' Ignore any empty strings (not allowed).
+    Do
+        intPos = InStr(intLastPos, sFilterIn, "|")
+        If (intPos > intLastPos) Then
+            sFilter = sFilter & Mid(sFilterIn, intLastPos, intPos - intLastPos) & vbNullChar
+            intNum = intNum + 1
+            intLastPos = intPos + 1
+        
+        ElseIf (intPos = intLastPos) Then
+            intLastPos = intPos + 1
+        
+        End If
+    
+    Loop Until (intPos = 0)
+        
+    ' Get last string if it exists (assuming strFilterIn was not bar terminated).
+    intPos = Len(sFilterIn)
+    If (intPos >= intLastPos) Then
+        sFilter = sFilter & Mid(sFilterIn, intLastPos, intPos - intLastPos + 1) & vbNullChar
+        intNum = intNum + 1
+    
+    End If
+    
+    ' Add *.* if there's no extension for the last string.
+    If intNum Mod 2 = 1 Then
+        sFilter = sFilter & "*.*" & vbNullChar
+    
+    End If
+    
+    ' Add terminating NULL if we have any filter.
+    If sFilter <> "" Then
+        sFilter = sFilter & vbNullChar
+    
+    End If
+    
+    MSA_ConvertFilterString = sFilter
+
+End Function
+
+Private Function MSA_GetSaveFileName(msaof As MSA_OPENFILENAME) As Integer
+' Opens the file save dialog.
+    
+Dim of              As OPENFILENAME
+Dim intRet          As Integer
+
+    MSAOF_to_OF msaof, of
+    of.Flags = of.Flags Or OFN_HIDEREADONLY
+    intRet = GetSaveFileName(of)
+    If intRet Then
+        OF_to_MSAOF of, msaof
+    
+    End If
+    
+    MSA_GetSaveFileName = intRet
+
+End Function
+
+Function MSA_SimpleGetSaveFileName() As String
+' Opens the file save dialog with default values.
+
+Dim msaof               As MSA_OPENFILENAME
+Dim intRet              As Integer
+Dim sRet              As String
+    
+    intRet = MSA_GetSaveFileName(msaof)
+    If intRet Then
+        sRet = msaof.sFullPathReturned
+    
+    End If
+    
+    MSA_SimpleGetSaveFileName = sRet
+
+End Function
+
+Private Function MSA_GetOpenFileName(msaof As MSA_OPENFILENAME) As Integer
+' Opens the Open dialog.
+    
+Dim of              As OPENFILENAME
+Dim intRet          As Integer
+
+    MSAOF_to_OF msaof, of
+    intRet = GetOpenFileName(of)
+    If intRet Then
+        OF_to_MSAOF of, msaof
+    
+    End If
+    
+    MSA_GetOpenFileName = intRet
+
+End Function
+
+Function MSA_SimpleGetOpenFileName() As String
+' Opens the Open dialog with default values.
+
+    Dim msaof As MSA_OPENFILENAME
+    Dim intRet As Integer
+    Dim sRet As String
+    
+    intRet = MSA_GetOpenFileName(msaof)
+    If intRet Then
+        sRet = msaof.sFullPathReturned
+    
+    End If
+    
+    MSA_SimpleGetOpenFileName = sRet
+
+End Function
+
+Private Sub OF_to_MSAOF(of As OPENFILENAME, msaof As MSA_OPENFILENAME)
+' This sub converts from the Win32 structure to the Microsoft Access structure.
+    
+    msaof.sFullPathReturned = left(of.lpstrFile, InStr(of.lpstrFile, vbNullChar) - 1)
+    msaof.sFileNameReturned = of.lpstrFileTitle
+    msaof.intFileOffset = of.nFileOffset
+    msaof.intFileExtension = of.nFileExtension
+
+End Sub
+
+Private Sub MSAOF_to_OF(msaof As MSA_OPENFILENAME, of As OPENFILENAME)
+' This sub converts from the Microsoft Access structure to the Win32 structure.
+    
+    Dim sFile As String * 512
+
+    ' Initialize some parts of the structure.
+    of.hwndOwner = Application.hWndAccessApp
+    of.hInstance = 0
+    of.lpstrCustomFilter = 0
+    of.nMaxCustrFilter = 0
+    of.lpfnHook = 0
+    of.lpTemplateName = 0
+    of.lCustrData = 0
+    
+    If msaof.sFilter = "" Then
+        of.lpstrFilter = MSA_CreateFilterString(ALLFILES)
+    
+    Else
+        of.lpstrFilter = msaof.sFilter
+    
+    End If
+    of.nFilterIndex = msaof.lngFilterIndex
+    
+    of.lpstrFile = msaof.sInitialFile _
+        & String(512 - Len(msaof.sInitialFile), 0)
+    of.nMaxFile = 511
+
+    of.lpstrFileTitle = String(512, 0)
+    of.nMaxFileTitle = 511
+
+    of.lpstrTitle = msaof.sDialogTitle
+
+    of.lpstrInitialDir = msaof.sInitialDir
+    
+    of.lpstrDefExt = msaof.sDefaultExtension
+
+    of.Flags = msaof.lngFlags
+    
+    of.lStructSize = Len(of)
+
+End Sub
