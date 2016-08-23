@@ -1,0 +1,111 @@
+Option Compare Database
+Option Explicit
+
+' General Errors
+Public Const adhcAccErrSuccess = 0
+Public Const adhcAccErrUnknown = -1
+
+' Common Dialogs
+
+' Dialog type
+Public Const gbolOpen = True
+Public Const gbolSave = False
+
+' GetFileName errors
+Public Const adhcAccErrGFNCantOpenDialog = -301
+Public Const adhcAccErrGFNUserCancelledDialog = -302
+
+
+' GetFileNameInfo flags
+Public Const adhcGfniConfirmReplace = &H1               ' Prompt if overwriting a file?
+Public Const adhcGfniNoChangeDir = &H2                  ' Disable the read-only option
+Public Const adhcGfniAllowReadOnly = &H4                ' Don't change to the directory the user selected?
+Public Const adhcGfniAllowMultiSelect = &H8             ' Allow multiple-selection?
+Public Const adhcGfniDirectoryOnly = &H20               ' Open as directory picker?
+Public Const adhcGfniInitializeView = &H40              ' Initialize the view to the lView member or use last selected view?
+
+' Views in the Office Find File dialog
+Public Const adhcGfniViewDetails = 0                    ' Details
+Public Const adhcGfniViewPreview = 1                    ' Preview
+Public Const adhcGfniViewProperties = 2                 ' Properties
+Public Const adhcGfniViewList = 3                       ' List (typical)
+
+Type adh_accOfficeGetFileNameInfo
+    hwndOwner       As Long
+    strAppName      As String * 255
+    strDlgTitle     As String * 255
+    strOpenTitle    As String * 255
+    strFile         As String * 4096
+    strInitialDir   As String * 255
+    strFilter       As String * 255
+    lngFilterIndex  As Long
+    lngView         As Long
+    lngFlags        As Long
+
+End Type
+
+Declare Function adh_accOfficeGetFileName Lib "msaccess.exe" Alias "#56" (gfni As adh_accOfficeGetFileNameInfo, ByVal fOpen As Integer) As Long
+
+'   Used to play sounds when opening a form
+Private Declare Function sndPlaySound Lib "winmm" Alias "sndPlaySoundA" (ByVal filename As String, ByVal snd_async As Long) As Long
+
+Public Function PlaySound(sWavFile As String)
+    ' Purpose: Plays a sound.
+    ' Argument: the full path and file name.
+
+    If sndPlaySound(sWavFile, 1) = 0 Then
+        MsgBox "The Sound Did Not Play!", vbExclamation
+    
+    End If
+    
+    
+End Function
+
+Function adhOfficeGetFileName(gfni As adh_accOfficeGetFileNameInfo, _
+ ByVal fOpen As Integer) As Long
+ 
+    ' Use the Office file selector common dialog
+    ' exposed by Access.
+    
+Dim lng         As Long
+
+    With gfni
+        .strAppName = RTrim$(.strAppName) & vbNullChar
+        .strDlgTitle = RTrim$(.strDlgTitle) & vbNullChar
+        .strOpenTitle = RTrim$(.strOpenTitle) & vbNullChar
+        .strFile = RTrim$(.strFile) & vbNullChar
+        .strInitialDir = RTrim$(.strInitialDir) & vbNullChar
+        .strFilter = RTrim$(.strFilter) & vbNullChar
+        SysCmd acSysCmdClearHelpTopic
+        lng = adh_accOfficeGetFileName(gfni, fOpen)
+        .strAppName = RTrim$(adhTrimNull(.strAppName))
+        .strDlgTitle = RTrim$(adhTrimNull(.strDlgTitle))
+        .strOpenTitle = RTrim$(adhTrimNull(.strOpenTitle))
+        .strFile = RTrim$(adhTrimNull(.strFile))
+        .strInitialDir = RTrim$(adhTrimNull(.strInitialDir))
+        .strFilter = RTrim$(adhTrimNull(.strFilter))
+    
+    End With
+    
+    adhOfficeGetFileName = lng
+    
+End Function
+
+
+Function adhTrimNull(strVal As String) As String
+' Trim the end of a string, stopping at the first
+' null character.
+    
+Dim intPos          As Integer
+    
+    intPos = InStr(strVal, vbNullChar)
+    
+    If intPos > 0 Then
+        adhTrimNull = left$(strVal, intPos - 1)
+    
+    Else
+        adhTrimNull = strVal
+    
+    End If
+
+End Function
